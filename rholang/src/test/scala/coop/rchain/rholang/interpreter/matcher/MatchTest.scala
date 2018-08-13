@@ -1,5 +1,7 @@
 package coop.rchain.rholang.interpreter.matcher
 
+import java.io.StringReader
+
 import cats.{Eval => _}
 import com.google.protobuf.ByteString
 import coop.rchain.models.Connective.ConnectiveInstance._
@@ -76,6 +78,18 @@ class VarMatcherSpec extends FlatSpec with Matchers with TimeLimits with TripleE
     val clue       = s"Invalid test case - ${termName} is not sorted"
     assert(printer.buildString(term) == printer.buildString(sortedTerm), clue)
     assert(term == sortedTerm, clue)
+  }
+
+  def parse(rho: String): Par = {
+    val lexer  = new Yylex(new StringReader(rho))
+    val parser = new parser(lexer, lexer.getSymbolFactory())
+    val ast    = parser.pProc()
+    val inputs = ProcVisitInputs(VectorPar(), IndexMapChain[VarSort](), DebruijnLevelMap[VarSort]())
+    val normalized = ProcNormalizeMatcher.normalizeMatch[Coeval](ast, inputs).value
+    //The sorting is needed because the normalizer reverses the parsed terms
+    //TODO Make normalizer retain term order
+    //TODO Get rid of sorting here so that the term better reflects user input
+    Sortable.sortMatch(normalized.par).term
   }
 
   val wc = Wildcard(Var.WildcardMsg())
