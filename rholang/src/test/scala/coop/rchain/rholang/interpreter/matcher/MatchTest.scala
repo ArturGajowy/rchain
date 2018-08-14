@@ -81,15 +81,18 @@ class VarMatcherSpec extends FlatSpec with Matchers with TimeLimits with TripleE
   }
 
   def parse(rho: String): Par = {
-    val lexer  = new Yylex(new StringReader(rho))
-    val parser = new parser(lexer, lexer.getSymbolFactory())
-    val ast    = parser.pProc()
-    val inputs = ProcVisitInputs(VectorPar(), IndexMapChain[VarSort](), DebruijnLevelMap[VarSort]())
+    val source     = s"for (@x3, @x2, @x1, @x0 <- @0) { $rho }"
+    val lexer      = new Yylex(new StringReader(source))
+    val parser     = new parser(lexer, lexer.getSymbolFactory())
+    val ast        = parser.pProc()
+    val inputs     = ProcVisitInputs(VectorPar(), IndexMapChain[VarSort](), DebruijnLevelMap[VarSort]())
     val normalized = ProcNormalizeMatcher.normalizeMatch[Coeval](ast, inputs).value
     //The sorting is needed because the normalizer reverses the parsed terms
     //TODO Make normalizer retain term order
     //TODO Get rid of sorting here so that the term better reflects user input
-    Sortable.sortMatch(normalized.par).term
+    val astTerm = Sortable.sortMatch(normalized.par).term
+    val rhoTerm = astTerm.receives.head.body
+    rhoTerm
   }
 
   val wc = Wildcard(Var.WildcardMsg())
