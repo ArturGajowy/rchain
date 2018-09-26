@@ -21,7 +21,7 @@ lazy val projectSettings = Seq(
     Resolver.sonatypeRepo("snapshots"),
     "jitpack" at "https://jitpack.io"
   ),
-  scalafmtOnCompile := sys.env.get("CI").isEmpty, // disable in CI environments
+  scalafmtOnCompile := false,
   scapegoatVersion in ThisBuild := "1.3.4",
   testOptions in Test += Tests.Argument("-oD"), //output test durations
   dependencyOverrides ++= Seq(
@@ -38,7 +38,7 @@ lazy val projectSettings = Seq(
   IntegrationTest / parallelExecution := false,
   IntegrationTest / testForkedParallel := false,
 ) ++
-// skip api doc generation if SKIP_DOC env variable is defined 
+// skip api doc generation if SKIP_DOC env variable is defined
 Seq(sys.env.get("SKIP_DOC")).flatMap { _ =>
   Seq(
     publishArtifact in (Compile, packageDoc) := false,
