@@ -16,9 +16,11 @@ object Dependencies {
   val catsCore            = "org.typelevel"              %% "cats-core"                 % catsVersion
   val catsLawsTest        = "org.typelevel"              %% "cats-laws"                 % catsVersion % "test"
   val catsLawsTestkitTest = "org.typelevel"              %% "cats-testkit"              % catsVersion % "test"
+  val catsFree            = "org.typelevel"              %% "cats-free"                 % "1.4.0"
   val catsEffect          = "org.typelevel"              %% "cats-effect"               % "1.0.0"
   val catsMtl             = "org.typelevel"              %% "cats-mtl-core"             % catsMtlVersion
   val catsMtlLawsTest     = "org.typelevel"              %% "cats-mtl-laws"             % catsMtlVersion % "test"
+  val matryoshka          = "com.slamdata"               %% "matryoshka-core"           % "0.21.2"
   val circeCore           = "io.circe"                   %% "circe-core"                % circeVersion
   val circeGeneric        = "io.circe"                   %% "circe-generic"             % circeVersion
   val circeGenericExtras  = "io.circe"                   %% "circe-generic-extras"      % circeVersion
@@ -82,6 +84,7 @@ object Dependencies {
     scodecBits,
     scalacheckNoTest,
     //overrides for transitive dependencies (we don't use them directly, hence no val-s)
+    "com.github.mpilquist"     %% "simulacrum"             % "0.12.0",
     "org.typelevel"            %% "machinist"              % "0.6.5",
     "org.typelevel"            %% "catalysts-platform"     % "0.6",
     "com.lihaoyi"              %% "sourcecode"             % "0.1.4",
