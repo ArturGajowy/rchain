@@ -215,7 +215,7 @@ case class PrettyPrinter(
         buildStringM(e)
 
       case m: Match =>
-        pure("match ") |+| buildStringM(m.target) |+| pure(" {\n") |+|
+        pure("match { ") |+| buildStringM(m.target) |+| pure(" } {\n") |+|
           (pure("") /: m.cases.zipWithIndex) {
             case (string, (matchCase, i)) =>
               string |+| pure(indentStr * (indent + 1)) |+| buildMatchCase(matchCase, indent + 1) |+| pure {
