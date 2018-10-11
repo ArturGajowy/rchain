@@ -224,7 +224,7 @@ case class PrettyPrinter(
               }
           } |+| pure("\n" + (indentStr * indent) + "}")
 
-      case g: GPrivate => pure("Unforgeable(0x" + Base16.encode(g.id.toByteArray) + ")")
+      case _: GPrivate => pure("((1337))")
       case c: Connective =>
         c.connectiveInstance match {
           case ConnectiveInstance.Empty => pure("")
