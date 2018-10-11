@@ -325,10 +325,11 @@ case class PrettyPrinter(
         freeId = boundId,
         baseId = setBaseId()
       )
-      .buildStringM(matchCase.pattern, indent) |+| pure(" } => ") |+|
+      .buildStringM(matchCase.pattern, indent) |+| pure(" } => { ") |+|
       this
         .copy(boundShift = boundShift + patternFree)
-        .buildStringM(matchCase.source, indent)
+        .buildStringM(matchCase.source, indent) |+|
+      pure(" }")
   }
 
   private def isEmpty(p: Par) =
