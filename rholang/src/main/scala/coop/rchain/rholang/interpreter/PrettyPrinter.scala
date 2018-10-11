@@ -198,7 +198,7 @@ case class PrettyPrinter(
           }
 
       case b: Bundle =>
-        pure(BundleOps.showInstance.show(b) + "{ " + (indentStr * (indent + 1))) |+|
+        pure(BundleOps.showInstance.show(b) + "{ ") |+|
           buildStringM(b.body, indent + 1) |+| pure(" }")
 
       case n: New =>
