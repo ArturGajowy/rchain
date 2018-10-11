@@ -318,14 +318,14 @@ case class PrettyPrinter(
 
   private def buildMatchCase(matchCase: MatchCase, indent: Int): Coeval[String] = {
     val patternFree: Int = matchCase.freeCount
-    this
+    pure("{ ") |+| this
       .copy(
         freeShift = boundShift,
         boundShift = 0,
         freeId = boundId,
         baseId = setBaseId()
       )
-      .buildStringM(matchCase.pattern, indent) |+| pure(" => ") |+|
+      .buildStringM(matchCase.pattern, indent) |+| pure(" } => ") |+|
       this
         .copy(boundShift = boundShift + patternFree)
         .buildStringM(matchCase.source, indent)
