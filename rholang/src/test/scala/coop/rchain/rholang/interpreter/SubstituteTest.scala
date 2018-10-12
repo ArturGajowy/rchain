@@ -10,6 +10,7 @@ import coop.rchain.rholang.interpreter.errors.SubstituteError
 import coop.rchain.models.rholang.implicits._
 import monix.eval.Coeval
 import org.scalacheck.Gen
+import org.scalactic.anyvals.PosInt
 import org.scalatest.prop.PropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
 
@@ -21,6 +22,61 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   implicit val depth: Int    = 0
   implicit val env: Env[Par] = Env()
+
+  it should "work" in {
+    import testImplicits._
+
+    var i = 0
+    val target: PosInt = 5000
+
+    forAll(sizeRange(10), minSuccessful(target)) { par: Par =>
+      val printer    = PrettyPrinter(100, 100)
+      val rho        = printer.buildString(par)
+      val normalized = Interpreter.buildNormalizedTerm(rho).runAttempt()
+      if (normalized.isLeft) {
+        i += 1
+        println("===== Failure #" + i)
+        println(rho)
+        println()
+        println(Pretty.pretty(par))
+      }
+      println("============= ")
+      whenever(normalized.isRight) {
+        val rhoAgain  = printer.buildString(normalized.right.get)
+        val normAgain = Interpreter.buildNormalizedTerm(rhoAgain).runAttempt()
+        assert(normAgain == normalized)
+      }
+
+    //don't print/generate ids in par - they're not parse'able
+    //Variable reference: =free1995240989 at 1:1 is unbound.)
+    }
+
+    val failureRate = 1.0 * i / target
+    println(s"Failure rate: $failureRate")
+  }
+
+  it should "print" in {
+    val rho =
+      """
+for( @{Nil} <- @{Nil} ) {
+  Nil
+} |
+new x100, x101, x102, x103, x104, x105, x106, x107, x108 in {
+  Nil
+} |
+match Nil {
+  { Nil } => match Nil {
+    { `` } => Nil
+  }
+}
+      """
+    println(rho)
+    println()
+
+    val normalized = Interpreter.buildNormalizedTerm(rho).value()
+
+    println(Pretty.pretty(normalized))
+  }
 
   it should "retain all non-Empty par-ed connectives" in {
     val sampleConnectives = Seq(
