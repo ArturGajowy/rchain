@@ -17,35 +17,52 @@ import scala.collection.immutable.BitSet
 import scala.reflect.ClassTag
 import scala.reflect.runtime.currentMirror
 
+
+trait HasPretty {
+  type tpe
+  def pretty: String
+}
+
+case class MkPretty[A : Pretty](value: A) extends HasPretty {
+  type tpe = A
+  def pretty: String = s"MkPretty(${Pretty.pretty(value)})"
+}
+
 class PrettySpec extends FlatSpec with PropertyChecks with Matchers {
 
   implicit override val generatorDrivenConfig =
-    PropertyCheckConfiguration(sizeRange = 20, minSuccessful = 5)
+    PropertyCheckConfiguration(sizeRange = 1, minSuccessful = 1)
 
   behavior of "Pretty"
 
-  consistentWithEquals[Par]
-  consistentWithEquals[Expr]
-  consistentWithEquals[Send]
-  consistentWithEquals[Receive]
-  consistentWithEquals[New]
-
-  consistentWithEquals[Match]
-  consistentWithEquals[ESet]
-  consistentWithEquals[EMap]
-  consistentWithEquals[ParSet]
-  consistentWithEquals[ParMap]
+  consistentWithEquals
 
 
-  def consistentWithEquals[A: Arbitrary: Pretty](
-      implicit tag: ClassTag[A]
-  ): Unit =
-    it must s"stably print compiling code evaluating to the original value for ${tag.runtimeClass.getSimpleName}" in {
-      forAll(Gen.listOfN(10, Arbitrary.arbitrary[A])) { x: Seq[A] =>
-          val pretty  = Pretty.pretty(x)
-          val evaluated = evaluateSeq[A](pretty)
-          assert(x == evaluated)
-          assert(Pretty.pretty(evaluated) == pretty)
+  def consistentWithEquals: Unit =
+    it must s"print compiling code evaluating to the original value" in {
+      val values: Gen[List[HasPretty]] = Gen.listOfN(10, Gen.oneOf(
+        Arbitrary.arbitrary[Par].map(MkPretty(_)),
+        Arbitrary.arbitrary[Expr].map(MkPretty(_)),
+        Arbitrary.arbitrary[Send].map(MkPretty(_)),
+        Arbitrary.arbitrary[Receive].map(MkPretty(_)),
+        Arbitrary.arbitrary[New].map(MkPretty(_)),
+        Arbitrary.arbitrary[Match].map(MkPretty(_)),
+        Arbitrary.arbitrary[ESet].map(MkPretty(_)),
+        Arbitrary.arbitrary[EMap].map(MkPretty(_)),
+        Arbitrary.arbitrary[ParSet].map(MkPretty(_)),
+        Arbitrary.arbitrary[ParMap].map(MkPretty(_)),
+      ))
+
+      forAll(values) { x: Seq[HasPretty] =>
+        val pretty  = x.map(_.pretty).mkString("Seq(\n  ", ",\n  ", ")\n")
+        println()
+        println(pretty)
+        println()
+        println(pretty.count(_ == '\n'))
+        val evaluated = evaluateSeq[HasPretty](pretty)
+        assert(x == evaluated)
+        val evaluatedPretty = evaluated.map(_.pretty).mkString("Seq(\n  ", ",\n  ", ")\n")
+        assert(evaluatedPretty == pretty)
       }
     }
 
@@ -68,6 +85,7 @@ class PrettySpec extends FlatSpec with PropertyChecks with Matchers {
          |
          |prettyCompiled
       """.stripMargin
+
 
     import scala.reflect.runtime.currentMirror
     import scala.tools.reflect.ToolBox
