@@ -1,21 +1,9 @@
 package coop.rchain.models
 
-import com.google.protobuf.ByteString
-import coop.rchain.models.BitSetBytesMapper._
 import coop.rchain.models.Connective.ConnectiveInstance.{Empty => _}
-import coop.rchain.models.Expr.ExprInstance._
-import coop.rchain.models.Var.VarInstance
-import coop.rchain.models.serialization.implicits._
 import coop.rchain.models.testImplicits._
-import coop.rchain.rspace.Serialize
-import monix.eval.Coeval
-import org.scalacheck.{Arbitrary, Gen, Shrink}
 import org.scalatest.prop.PropertyChecks
-import org.scalatest.{Assertion, FlatSpec, Matchers}
-
-import scala.collection.immutable.BitSet
-import scala.reflect.ClassTag
-import scala.reflect.runtime.currentMirror
+import org.scalatest.{FlatSpec, Matchers}
 
 
 trait HasPretty {
@@ -31,45 +19,63 @@ case class MkPretty[A : Pretty](value: A) extends HasPretty {
 class PrettySpec extends FlatSpec with PropertyChecks with Matchers {
 
   implicit override val generatorDrivenConfig =
-    PropertyCheckConfiguration(sizeRange = 1, minSuccessful = 1)
+    PropertyCheckConfiguration(sizeRange = 50, minSuccessful = 10)
 
   behavior of "Pretty"
 
   consistentWithEquals
 
+  implicit def prettyTuple10[
+    T0: Pretty,
+    T1: Pretty,
+    T2: Pretty,
+    T3: Pretty,
+    T4: Pretty,
+    T5: Pretty,
+    T6: Pretty,
+    T7: Pretty,
+    T8: Pretty,
+    T9: Pretty
+  ] : Pretty[(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)] = new Pretty[(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)] {
+    override def pretty(value: (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9),
+                        indentLevel: Int): String = {
+        PrettyUtils.parenthesisedStrings(
+          Seq(
+            Pretty[T0].pretty(value._1, indentLevel + 1),
+            Pretty[T1].pretty(value._2, indentLevel + 1),
+            Pretty[T2].pretty(value._3, indentLevel + 1),
+            Pretty[T3].pretty(value._4, indentLevel + 1),
+            Pretty[T4].pretty(value._5, indentLevel + 1),
+            Pretty[T5].pretty(value._6, indentLevel + 1),
+            Pretty[T6].pretty(value._7, indentLevel + 1),
+            Pretty[T7].pretty(value._8, indentLevel + 1),
+            Pretty[T8].pretty(value._9, indentLevel + 1),
+            Pretty[T9].pretty(value._10, indentLevel + 1),
+          ),
+          indentLevel
+        )
+    }}
+
 
   def consistentWithEquals: Unit =
     it must s"print compiling code evaluating to the original value" in {
-      val values: Gen[List[HasPretty]] = Gen.listOfN(10, Gen.oneOf(
-        Arbitrary.arbitrary[Par].map(MkPretty(_)),
-        Arbitrary.arbitrary[Expr].map(MkPretty(_)),
-        Arbitrary.arbitrary[Send].map(MkPretty(_)),
-        Arbitrary.arbitrary[Receive].map(MkPretty(_)),
-        Arbitrary.arbitrary[New].map(MkPretty(_)),
-        Arbitrary.arbitrary[Match].map(MkPretty(_)),
-        Arbitrary.arbitrary[ESet].map(MkPretty(_)),
-        Arbitrary.arbitrary[EMap].map(MkPretty(_)),
-        Arbitrary.arbitrary[ParSet].map(MkPretty(_)),
-        Arbitrary.arbitrary[ParMap].map(MkPretty(_)),
-      ))
+      type T = (Par, Expr, Send, Receive, New, Match, ESet, EMap, ParSet, ParMap)
+      val tPretty = prettyTuple10[Par, Expr, Send, Receive, New, Match, ESet, EMap, ParSet, ParMap]
 
-      forAll(values) { x: Seq[HasPretty] =>
-        val pretty  = x.map(_.pretty).mkString("Seq(\n  ", ",\n  ", ")\n")
+      forAll { x: T =>
+        val pretty = Pretty.pretty(x)(tPretty)
         println()
         println(pretty)
         println()
         println(pretty.count(_ == '\n'))
-        val evaluated = evaluateSeq[HasPretty](pretty)
+        val evaluated = evaluate[T](pretty, "(Par, Expr, Send, Receive, New, Match, ESet, EMap, ParSet, ParMap)")
         assert(x == evaluated)
-        val evaluatedPretty = evaluated.map(_.pretty).mkString("Seq(\n  ", ",\n  ", ")\n")
+        val evaluatedPretty = Pretty.pretty(evaluated)(tPretty)
         assert(evaluatedPretty == pretty)
       }
     }
 
-  def evaluateSeq[A](pretty: String)(
-    implicit tag: ClassTag[A]
-  ): Seq[A] = {
-    val className = tag.runtimeClass.getCanonicalName
+  def evaluate[A](pretty: String, typeString: String): A = {
     val string =
       s"""
          |import coop.rchain.models._
@@ -81,7 +87,7 @@ class PrettySpec extends FlatSpec with PropertyChecks with Matchers {
          |import scala.collection.immutable.BitSet
          |import monix.eval.Coeval
          |
-         |val prettyCompiled: Seq[$className] = $pretty
+         |val prettyCompiled: $typeString = $pretty
          |
          |prettyCompiled
       """.stripMargin
@@ -91,6 +97,6 @@ class PrettySpec extends FlatSpec with PropertyChecks with Matchers {
     import scala.tools.reflect.ToolBox
     val toolbox = currentMirror.mkToolBox()
     val tree    = toolbox.parse(string)
-    toolbox.eval(tree).asInstanceOf[Seq[A]]
+    toolbox.eval(tree).asInstanceOf[A]
   }
 }
