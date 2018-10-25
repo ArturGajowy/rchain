@@ -32,11 +32,11 @@ trait PrettyInstances extends PrettyDerivation {
   import PrettyUtils._
 
   implicit val PrettyString  = singleLine(literalize(_: String))
-  implicit val PrettyBoolean = fromToString[Boolean]
-  implicit val PrettyByte    = fromToString[Byte]
-  implicit val PrettyInt     = fromToString[Int]
-  implicit val PrettyLong    = fromToString[Long]
-  implicit val PrettyBitSet  = fromToString[BitSet]
+  implicit val PrettyBoolean = fromToString[Boolean]()
+  implicit val PrettyByte    = fromToString[Byte]()
+  implicit val PrettyInt     = fromToString[Int]()
+  implicit val PrettyLong    = fromToString[Long](_ + "L")
+  implicit val PrettyBitSet  = fromToString[BitSet]()
 
   // obviously won't print compiling code,
   // but seeing the stacktrace is more important in this case
@@ -60,7 +60,7 @@ trait PrettyInstances extends PrettyDerivation {
   implicit def prettySet[A: Pretty]     = fromIterable[Set[A], A]("Set")
   implicit def prettyHashSet[A: Pretty] = fromIterable[HashSet[A], A]("HashSet")
   implicit def prettySortedParHashSet   = fromIterable[SortedParHashSet, Par]("SortedParHashSet(Seq")
-  implicit def prettySortedParMap       = fromIterable[SortedParMap, (Par, Par)]("SortedParMap(Map")
+  implicit def prettySortedParMap       = fromIterable[SortedParMap, (Par, Par)]("SortedParMap(Seq")
 
   implicit def prettyPair[A: Pretty, B: Pretty]: Pretty[(A, B)] =
     (value: (A, B), indentLevel: Int) => {
@@ -87,7 +87,7 @@ trait PrettyInstances extends PrettyDerivation {
 
   implicit def prettyCoeval[A: Pretty]: Pretty[Coeval[A]] =
     (value: Coeval[A], indentLevel: Int) =>
-      s"Coeval.now(${Pretty[A].pretty(value.value, indentLevel)}) /* was Coeval.${value.getClass.getSimpleName} */"
+      s"Coeval.now(${Pretty[A].pretty(value.value, indentLevel)})"
 
   implicit val PrettyPar: Pretty[Par]   = gen[Par]
   implicit val PrettyExpr               = gen[Expr]
@@ -99,7 +99,8 @@ trait PrettyInstances extends PrettyDerivation {
 
   def singleLine[A](print: A => String): Pretty[A] = (value: A, indentLevel: Int) => print(value)
 
-  def fromToString[A]: Pretty[A] = (value: A, indentLevel: Int) => value.toString
+  def fromToString[A](transform: String => String = identity): Pretty[A] =
+    (value: A, indentLevel: Int) => transform(value.toString)
 
   def fromIterable[F <: Iterable[A], A: Pretty](prefix: String): Pretty[F] = {
     val prefixParensCount = prefix.count(_ == '(')
