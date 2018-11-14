@@ -1,3 +1,5 @@
+import java.lang.Runtime.getRuntime
+
 import sbt._
 import sbt.Keys._
 
@@ -23,7 +25,10 @@ object CompilerSettings {
       "-encoding", "UTF-8",
       "-feature",
       "-language:_",
-      "-unchecked"
+      "-unchecked",
+      //With > 16: [error] invalid setting for -Ybackend-parallelism must be between 1 and 16
+      //https://github.com/scala/scala/blob/v2.12.6/src/compiler/scala/tools/nsc/settings/ScalaSettings.scala#L240
+      "-Ybackend-parallelism", getRuntime.availableProcessors().min(16).toString
     )
     // format: on
 
@@ -57,7 +62,8 @@ object CompilerSettings {
           "-Xfatal-warnings",
           "-Ywarn-unused-import",
           "-Ywarn-unused:imports"
-        ))
+        )
+      )
     },
     scalacOptions in (Test, console) := (scalacOptions in (Compile, console)).value
   )

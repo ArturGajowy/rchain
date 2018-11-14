@@ -1,25 +1,32 @@
 package coop.rchain.casper.genesis.contracts
 
-import coop.rchain.casper.util.rholang.InterpreterUtil
+import coop.rchain.casper.util.Sorting
 import coop.rchain.crypto.codec.Base16
-import coop.rchain.models.Par
-import coop.rchain.rholang.build.CompiledRholangSource
 
-case class ProofOfStakeValidator(id: Array[Byte], stake: Int)
+//TODO: include other fields relevent to PoS (e.g. rewards channel)
+case class ProofOfStakeValidator(id: Array[Byte], stake: Long)
 
-class ProofOfStake(validators: Seq[ProofOfStakeValidator]) extends CompiledRholangSource {
-  val code = s"""
-       |@"proofOfStake"!($validatorCode)
-       |""".stripMargin
+case class ProofOfStakeParams(
+    minimumBond: Long,
+    maximumBond: Long,
+    validators: Seq[ProofOfStakeValidator]
+) {
+  require(minimumBond <= maximumBond)
+  require(validators.nonEmpty)
+}
 
-  private def validatorCode: String =
-    if (validators.isEmpty) {
-      "{}"
-    } else {
-      val validatorsMap = validators
-        .map(validator => s""""${Base16.encode(validator.id)}": ${validator.stake}""")
-        .mkString(",")
-      s"""{$validatorsMap}"""
-    }
-  override val term: Par = InterpreterUtil.mkTerm(code).right.get
+object ProofOfStake {
+  def initialBondsCode(validators: Seq[ProofOfStakeValidator]): String = {
+    import Sorting.byteArrayOrdering
+    val sortedValidators = validators.sortBy(_.id)
+    val mapEntries = sortedValidators.iterator.zipWithIndex
+      .map {
+        case (ProofOfStakeValidator(id, stake), index) =>
+          val pk = Base16.encode(id)
+          s""" "$pk".hexToBytes() : ($stake, "secp256k1Verify", Nil, ${index + 1})"""
+      }
+      .mkString(", ")
+
+    s"{$mapEntries}"
+  }
 }

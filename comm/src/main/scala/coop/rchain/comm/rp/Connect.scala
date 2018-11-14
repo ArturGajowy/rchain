@@ -8,8 +8,8 @@ import coop.rchain.catscontrib._
 import coop.rchain.comm.CommError._
 import coop.rchain.comm._
 import coop.rchain.comm.discovery._
-import coop.rchain.comm.protocol.routing.{Protocol => RoutingProtocol}
-import coop.rchain.comm.transport.CommMessages._
+import coop.rchain.comm.protocol.routing._
+import coop.rchain.comm.rp.ProtocolHelper._
 import coop.rchain.comm.transport._
 import coop.rchain.metrics.Metrics
 import coop.rchain.shared._
@@ -31,34 +31,37 @@ object Connect {
     implicit class ConnectionsOps(connections: Connections) {
 
       def addConn[F[_]: Monad: Log: Metrics](connection: Connection): F[Connections] =
-        connections
-          .contains(connection)
-          .fold(
-            connections.pure[F],
-            Log[F].info(s"Peers: ${connections.size + 1}.").as(connection :: connections) >>= (
-                conns => Metrics[F].setGauge("peers", conns.size.toLong).as(conns))
-          )
+        addConn[F](List(connection))
+
+      def addConn[F[_]: Monad: Log: Metrics](toBeAdded: List[Connection]): F[Connections] = {
+        val ids = toBeAdded.map(_.id)
+        val newConnections = connections.partition(peer => ids.contains(peer.id)) match {
+          case (_, rest) => rest ++ toBeAdded
+        }
+        val size = newConnections.size.toLong
+        Log[F].info(s"Peers: $size.") *>
+          Metrics[F].setGauge("peers", size).as(newConnections)
+      }
 
       def removeConn[F[_]: Monad: Log: Metrics](connection: Connection): F[Connections] =
-        for {
-          result <- connections.filter(_ != connection).pure[F]
-          count  = result.size.toLong
-          _      <- Log[F].info(s"Peers: $count.") >>= (_ => Metrics[F].setGauge("peers", count))
-        } yield result
+        removeConn[F](List(connection))
 
-      def removeAndAddAtEnd[F[_]: Monad: Log: Metrics](toRemove: List[PeerNode],
-                                                       toAddAtEnd: List[PeerNode]): F[Connections] =
-        for {
-          result <- (connections.filter(conn => !toRemove.contains(conn)) ++ toAddAtEnd).pure[F]
-          count  = result.size.toLong
-          _      <- Log[F].info(s"Peers: $count.") >>= (_ => Metrics[F].setGauge("peers", count))
-        } yield result
+      def removeConn[F[_]: Monad: Log: Metrics](toBeRemoved: List[Connection]): F[Connections] = {
+        val ids = toBeRemoved.map(_.id)
+        val newConnections = connections.partition(peer => ids.contains(peer.id)) match {
+          case (_, rest) => rest
+        }
+        val size = newConnections.size.toLong
+        Log[F].info(s"Peers: $size.") *>
+          Metrics[F].setGauge("peers", size).as(newConnections)
+      }
     }
   }
 
   import Connections._
 
-  type RPConfAsk[F[_]] = ApplicativeAsk[F, RPConf]
+  type RPConfState[F[_]] = MonadState[F, RPConf]
+  type RPConfAsk[F[_]]   = ApplicativeAsk[F, RPConf]
 
   object RPConfAsk {
     def apply[F[_]](implicit ev: ApplicativeAsk[F, RPConf]): ApplicativeAsk[F, RPConf] = ev
@@ -66,11 +69,10 @@ object Connect {
 
   private implicit val logSource: LogSource = LogSource(this.getClass)
 
-  def clearConnections[
-      F[_]: Capture: Monad: Time: ConnectionsCell: RPConfAsk: TransportLayer: Log: Metrics]
+  def clearConnections[F[_]: Capture: Monad: Time: ConnectionsCell: RPConfAsk: TransportLayer: Log: Metrics]
     : F[Int] = {
 
-    def sendHeartbeat(peer: PeerNode): F[(PeerNode, CommErr[RoutingProtocol])] =
+    def sendHeartbeat(peer: PeerNode): F[(PeerNode, CommErr[Protocol])] =
       for {
         local   <- RPConfAsk[F].reader(_.local)
         timeout <- RPConfAsk[F].reader(_.defaultTimeout)
@@ -82,10 +84,12 @@ object Connect {
       for {
         numOfConnectionsPinged <- RPConfAsk[F].reader(_.clearConnections.numOfConnectionsPinged)
         toPing                 = connections.take(numOfConnectionsPinged)
-        results                <- toPing.traverse(sendHeartbeat(_))
+        results                <- toPing.traverse(sendHeartbeat)
         successfulPeers        = results.collect { case (peer, Right(_)) => peer }
         failedPeers            = results.collect { case (peer, Left(_)) => peer }
-        _                      <- ConnectionsCell[F].modify(_.removeAndAddAtEnd[F](toPing, successfulPeers))
+        _ <- ConnectionsCell[F].modify { connections =>
+              connections.removeConn[F](toPing) >>= (_.addConn[F](successfulPeers))
+            }
       } yield failedPeers.size
 
     for {
@@ -95,8 +99,7 @@ object Connect {
     } yield cleared
   }
 
-  def findAndConnect[
-      F[_]: Capture: Monad: Log: Time: Metrics: NodeDiscovery: ErrorHandler: ConnectionsCell: RPConfAsk](
+  def findAndConnect[F[_]: Capture: Monad: Log: Time: Metrics: NodeDiscovery: ErrorHandler: ConnectionsCell: RPConfAsk](
       conn: (PeerNode, FiniteDuration) => F[Unit]
   ): F[List[PeerNode]] =
     for {
@@ -113,21 +116,22 @@ object Connect {
           }
     } yield peersAndResonses.filter(_._2.isRight).map(_._1)
 
-  def connect[
-      F[_]: Capture: Monad: Log: Time: Metrics: TransportLayer: NodeDiscovery: ErrorHandler: ConnectionsCell: RPConfAsk](
+  def connect[F[_]: Capture: Monad: Log: Time: Metrics: TransportLayer: NodeDiscovery: ErrorHandler: ConnectionsCell: RPConfAsk](
       peer: PeerNode,
-      timeout: FiniteDuration): F[Unit] =
+      timeout: FiniteDuration
+  ): F[Unit] =
     for {
       tss      <- Time[F].currentMillis
       peerAddr = peer.toAddress
       _        <- Log[F].debug(s"Connecting to $peerAddr")
       _        <- Metrics[F].incrementCounter("connects")
-      _        <- Log[F].info(s"Initialize protocol handshake to $peerAddr")
+      _        <- Log[F].debug(s"Initialize protocol handshake to $peerAddr")
       local    <- RPConfAsk[F].reader(_.local)
       ph       = protocolHandshake(local)
       phsresp  <- TransportLayer[F].roundTrip(peer, ph, timeout * 2) >>= ErrorHandler[F].fromEither
       _ <- Log[F].debug(
-            s"Received protocol handshake response from ${ProtocolHelper.sender(phsresp)}.")
+            s"Received protocol handshake response from ${ProtocolHelper.sender(phsresp)}."
+          )
       _   <- ConnectionsCell[F].modify(_.addConn[F](peer))
       tsf <- Time[F].currentMillis
       _   <- Metrics[F].record("connect-time-ms", tsf - tss)

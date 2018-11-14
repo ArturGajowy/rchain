@@ -1,20 +1,11 @@
 package coop.rchain.node.api
 
-import coop.rchain.node.diagnostics
-import coop.rchain.p2p.effects._
-
-import io.grpc.{Server, ServerBuilder}
-import io.grpc.netty.NettyServerBuilder
-import scala.concurrent.Future
-
-import cats._
-import cats.implicits._
+import cats.effect.Sync
 
 import coop.rchain.blockstorage.BlockStore
 import coop.rchain.casper.MultiParentCasperRef.MultiParentCasperRef
 import coop.rchain.casper.SafetyOracle
-import coop.rchain.casper.protocol.DeployServiceGrpc
-import coop.rchain.catscontrib._
+import coop.rchain.casper.protocol.CasperMessageGrpcMonix
 import coop.rchain.comm.discovery._
 import coop.rchain.comm.rp.Connect.ConnectionsCell
 import coop.rchain.node.diagnostics
@@ -23,41 +14,78 @@ import coop.rchain.node.model.diagnostics._
 import coop.rchain.node.model.repl._
 import coop.rchain.rholang.interpreter.Runtime
 import coop.rchain.shared._
-
-import io.grpc.{Server, ServerBuilder}
+import io.grpc.netty.NettyServerBuilder
+import io.grpc.Server
+import java.util.concurrent.TimeUnit
+import monix.eval.Task
 import monix.execution.Scheduler
+import cats._, cats.data._, cats.implicits._
+import coop.rchain.catscontrib._, ski._
+
+class GrpcServer(server: Server) {
+  def start: Task[Unit] = Task.delay(server.start())
+
+  private def attemptShutdown: Task[Boolean] =
+    (for {
+      _          <- Task.delay(server.shutdown())
+      _          <- Task.delay(server.awaitTermination(1000, TimeUnit.MILLISECONDS))
+      terminated <- Task.delay(server.isTerminated)
+    } yield terminated).attempt map (_.fold(kp(false), id))
+
+  private def shutdownImmediately: Task[Unit] =
+    Task.delay(server.shutdownNow()).attempt.as(())
+
+  def stop: Task[Unit] = attemptShutdown >>= { stopped =>
+    if (stopped) Task.unit else shutdownImmediately
+  }
+  def port: Int = server.getPort
+}
 
 object GrpcServer {
 
-  private implicit val logSource: LogSource = LogSource(this.getClass)
+  def apply(server: Server): GrpcServer = new GrpcServer(server)
 
-  def acquireInternalServer[
-      F[_]: Capture: Functor: NodeDiscovery: JvmMetrics: NodeMetrics: ConnectionsCell: Futurable](
+  def acquireInternalServer(
       port: Int,
-      runtime: Runtime)(implicit scheduler: Scheduler): F[Server] =
-    Capture[F].capture {
-      NettyServerBuilder
-        .forPort(port)
-        .addService(ReplGrpc.bindService(new ReplGrpcService(runtime), scheduler))
-        .addService(DiagnosticsGrpc.bindService(diagnostics.grpc[F], scheduler))
-        .build
+      maxMessageSize: Int,
+      runtime: Runtime,
+      grpcExecutor: Scheduler
+  )(
+      implicit worker: Scheduler,
+      nodeDiscovery: NodeDiscovery[Task],
+      jvmMetrics: JvmMetrics[Task],
+      nodeMetrics: NodeMetrics[Task],
+      connectionsCell: ConnectionsCell[Task]
+  ): Task[GrpcServer] =
+    Task.delay {
+      GrpcServer(
+        NettyServerBuilder
+          .forPort(port)
+          .executor(grpcExecutor)
+          .maxMessageSize(maxMessageSize)
+          .addService(
+            ReplGrpcMonix.bindService(new ReplGrpcService(runtime, worker), grpcExecutor)
+          )
+          .addService(DiagnosticsGrpcMonix.bindService(diagnostics.grpc, grpcExecutor))
+          .build
+      )
     }
 
-  def acquireExternalServer[
-      F[_]: Capture: Monad: MultiParentCasperRef: Log: SafetyOracle: BlockStore: Futurable](
-      port: Int)(implicit scheduler: Scheduler): F[Server] =
+  def acquireExternalServer[F[_]: Sync: Capture: MultiParentCasperRef: Log: SafetyOracle: BlockStore: Taskable](
+      port: Int,
+      maxMessageSize: Int,
+      grpcExecutor: Scheduler
+  )(implicit worker: Scheduler): F[GrpcServer] =
     Capture[F].capture {
-      NettyServerBuilder
-        .forPort(port)
-        .addService(DeployServiceGrpc.bindService(new DeployGrpcService[F], scheduler))
-        .build
+      GrpcServer(
+        NettyServerBuilder
+          .forPort(port)
+          .executor(grpcExecutor)
+          .maxMessageSize(maxMessageSize)
+          .addService(
+            CasperMessageGrpcMonix.bindService(DeployGrpcService.instance, grpcExecutor)
+          )
+          .build
+      )
     }
-
-  def start[F[_]: FlatMap: Capture: Log](serverExternal: Server, serverInternal: Server): F[Unit] =
-    for {
-      _ <- Capture[F].capture(serverExternal.start)
-      _ <- Capture[F].capture(serverInternal.start)
-      _ <- Log[F].info("gRPC server started, listening on ")
-    } yield ()
-
 }
