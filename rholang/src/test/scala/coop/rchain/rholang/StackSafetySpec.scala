@@ -30,9 +30,10 @@ object StackSafetySpec extends Assertions {
         case _: StackOverflowError => i
       }
     println("About to find max recursion depth for this test run")
-    val maxDepth = count(0)
-    println(s"Max recursion depth is $maxDepth")
-    maxDepth
+    val observedDepths   = Stream.continually(count(0)).sliding(5).map(_.toSet)
+    val firstStableDepth = observedDepths.find(_.size == 1).get.head
+    println(s"Max recursion depth is $firstStableDepth")
+    firstStableDepth
   }
 
   //this wrapper allows the test suite to continue with other tests after a SOE is spotted
