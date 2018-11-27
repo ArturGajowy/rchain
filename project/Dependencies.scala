@@ -19,6 +19,7 @@ object Dependencies {
   val catsEffect          = "org.typelevel"              %% "cats-effect"               % "1.0.0"
   val catsMtl             = "org.typelevel"              %% "cats-mtl-core"             % catsMtlVersion
   val catsMtlLawsTest     = "org.typelevel"              %% "cats-mtl-laws"             % catsMtlVersion % "test"
+  val eff                 = "org.atnos"                  %% "eff"                       % "5.3.0"
   val circeCore           = "io.circe"                   %% "circe-core"                % circeVersion
   val circeGeneric        = "io.circe"                   %% "circe-generic"             % circeVersion
   val circeGenericExtras  = "io.circe"                   %% "circe-generic-extras"      % circeVersion

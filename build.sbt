@@ -334,6 +334,7 @@ lazy val rholang = (project in file("rholang"))
     libraryDependencies ++= commonDependencies ++ Seq(
       catsMtl,
       catsEffect,
+      eff,
       monix,
       scallop,
       lightningj,
