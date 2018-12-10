@@ -1,3 +1,6 @@
+kind: pipeline
+name: default
+
 branches:
   - dev
   - master
