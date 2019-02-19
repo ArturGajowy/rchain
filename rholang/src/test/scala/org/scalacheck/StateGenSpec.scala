@@ -1,8 +1,8 @@
 package org.scalacheck
 
-import cats.{Eq, Monad}
+import cats.{Defer, Eq, Monad}
 import cats.data._
-import cats.laws.discipline.MonadTests
+  import cats.laws.discipline.MonadTests
 import cats.mtl.laws.discipline.MonadStateTests
 import cats.tests.CatsSuite
 import org.scalacheck.rng.Seed
@@ -34,25 +34,60 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   import GenInstances._
 
-  object Exp extends LowPrio {
+  type Env = Set[Char]
+  type EnvT[F[_], A] = ReaderT[F, Env, A]
+  type ArbEnv[A] = ArbF[EnvT, A]
 
-    implicit val arbFLet = ArbF[EnvT, Let](for {
-      n <- ReaderT.liftF(Gen.oneOf('Ą', 'Ź'))
-      v <- ArbF.arbF[EnvT, Exp](arbFExp)
-      r <- ReaderT.local{ x: Env => x + n }(
-        ArbF.arbF[EnvT, Exp]
-      )
-    } yield Let(n, v, r))
+  object ArbEnv extends GenericArb[EnvT] {
+    override def defer = Defer[EnvT[Gen, ?]]
+    override def monad = Monad[EnvT[Gen, ?]]
+    override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
+  }
+
+
+  object Exp extends ExpLowPrio {
+
+    implicit val arbFRef = {
+      println(s"def Ref")
+
+      ArbF[EnvT, Ref](Defer[EnvT[Gen, ?]].defer {
+        println(s"defer Ref")
+        for {
+          _ <- { println(s"run Ref"); ArbEnv.liftF(Gen.const(())) }
+          ns <- ReaderT.ask[Gen, Env]
+          n  <- ArbEnv.liftF(if (ns.isEmpty) Gen.fail else Gen.oneOf(ns.toSeq))
+        } yield Ref(n)
+      })
+    }
+
+    implicit val arbFLet = {
+      println(s"def Let")
+
+      ArbF[EnvT, Let](Defer[EnvT[Gen, ?]].defer {
+        println(s"defer Let")
+        for {
+          _ <- { println(s"run Let"); ArbEnv.liftF(Gen.const(())) }
+          n <- ArbEnv.liftF(arbString.arbitrary)
+          v <- ArbF.arbF[EnvT, Exp]
+          r <- ReaderT.local { x: Env =>
+                x + n
+          }(
+            ArbF.arbF[EnvT, Exp]
+          )
+        } yield Let(n, v, r)
+      })
+    }
 
   }
 
-  trait LowPrio {
+  trait ExpLowPrio {
     import ArbEnv._
 
+    //FIXME try to pick variants smartly
+
     implicit val arbFExp: ArbEnv[Exp] = ArbEnv.gen[Exp]
-    implicit val arbFLit: ArbEnv[Lit] = ArbEnv.gen[Lit]
-    implicit val arbFAdd: ArbEnv[Add] = ArbEnv.gen[Add]
-    implicit val arbFRef: ArbEnv[Ref] = ArbEnv.gen[Ref]
+//    implicit val arbFLit: ArbEnv[Lit] = ArbEnv.gen[Lit]
+//    implicit val arbFAdd: ArbEnv[Add] = ArbEnv.gen[Add]
 
   }
 
@@ -61,25 +96,14 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   case class ValidExp(e: Exp)
 
-  type Env = Set[Char]
-  type EnvT[F[_], A] = ReaderT[F, Env, A]
-  type ArbEnv[A] = ArbF[EnvT, A]
-
-
-  object ArbEnv extends GenericArb[EnvT] {
-
-    override def monad = Monad[EnvT[Gen, ?]]
-    override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
-  }
-
-
-
-
   implicit def validExp(implicit ev: ArbEnv[Exp]): Arbitrary[ValidExp] = {
     Arbitrary(
-      ev.arb.run(Set.empty).map(ValidExp)
+      ev.arb.run(Set('_')).map(ValidExp)
     )
   }
+
+  implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
+    PropertyCheckConfiguration(sizeRange = 200, minSize = 50, minSuccessful = 100)
 
   it should "work" in {
 
@@ -227,7 +251,7 @@ class GenLaws extends CatsSuite with ScalaCheckSetup {
 
 
 object GenInstances {
-  implicit val genInstances : Monad[Gen] = new Monad[Gen] {
+  implicit val genInstances : Monad[Gen] with Defer[Gen] = new Monad[Gen] with Defer[Gen] {
     // Members declared in cats.Applicative
     override def pure[A](x: A): Gen[A] =
       Gen.const(x)
@@ -237,6 +261,11 @@ object GenInstances {
       fa.flatMap(f)
     override def tailRecM[A, B](a: A)(f: A => Gen[Either[A,B]]): Gen[B] =
       GenShims.tailRecM(a)(f)
+
+    override def defer[A](fa: => Gen[A]): Gen[A] = {
+      import org.scalacheck.derive.GenExtra._
+      Gen.delay(fa).failOnStackOverflow
+    }
   }
 
 }
