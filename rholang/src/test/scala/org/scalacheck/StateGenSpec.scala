@@ -2,7 +2,7 @@ package org.scalacheck
 
 import cats.{Defer, Eq, Monad}
 import cats.data._
-  import cats.laws.discipline.MonadTests
+import cats.laws.discipline.MonadTests
 import cats.mtl.laws.discipline.MonadStateTests
 import cats.tests.CatsSuite
 import org.scalacheck.rng.Seed
@@ -17,63 +17,52 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
   behavior of "StateGen"
 
   sealed trait Exp
-  case class Lit(v: Int) extends Exp
-  case class Add(l: Exp, r: Exp) extends Exp
+  case class Lit(v: Int)                  extends Exp
+  case class Add(l: Exp, r: Exp)          extends Exp
   case class Let(n: Char, v: Exp, r: Exp) extends Exp
-  case class Ref(n: Char) extends Exp
+  case class Ref(n: Char)                 extends Exp
 
   implicit def arbString: Arbitrary[Char] = Arbitrary(Gen.alphaChar)
-  implicit def arbInt: Arbitrary[Int] = Arbitrary(Gen.chooseNum(-5, 5))
+  implicit def arbInt: Arbitrary[Int]     = Arbitrary(Gen.chooseNum(-5, 5))
 
   def print(e: Exp): String = e match {
-    case Lit(v) => v.toString
-    case Add(l, r) => s"(${print(l)} + ${print(r)})"
+    case Lit(v)       => v.toString
+    case Add(l, r)    => s"(${print(l)} + ${print(r)})"
     case Let(n, v, r) => s"let\n  $n = ${print(v)} in ${print(r)})"
-    case Ref(n) => s"$n"
+    case Ref(n)       => s"$n"
   }
 
   import GenInstances._
 
-  type Env = Set[Char]
+  type Env           = List[Char]
   type EnvT[F[_], A] = ReaderT[F, Env, A]
-  type ArbEnv[A] = ArbF[EnvT, A]
+  type ArbEnv[A]     = ArbF[EnvT, A]
 
   object ArbEnv extends GenericArb[EnvT] {
-    override def defer = Defer[EnvT[Gen, ?]]
-    override def monad = Monad[EnvT[Gen, ?]]
+    override def defer                               = Defer[EnvT[Gen, ?]]
+    override def monad                               = Monad[EnvT[Gen, ?]]
     override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
   }
-
 
   object Exp extends ExpLowPrio {
 
     implicit val arbFRef = {
-      println(s"def Ref")
-
       ArbF[EnvT, Ref](Defer[EnvT[Gen, ?]].defer {
-        println(s"defer Ref")
         for {
-          _ <- { println(s"run Ref"); ArbEnv.liftF(Gen.const(())) }
           ns <- ReaderT.ask[Gen, Env]
-          n  <- ArbEnv.liftF(if (ns.isEmpty) Gen.fail else Gen.oneOf(ns.toSeq))
+          n  <- ArbEnv.liftF(if (ns.isEmpty) Gen.fail else Gen.oneOf(ns))
         } yield Ref(n)
       })
     }
 
     implicit val arbFLet = {
-      println(s"def Let")
-
       ArbF[EnvT, Let](Defer[EnvT[Gen, ?]].defer {
-        println(s"defer Let")
         for {
-          _ <- { println(s"run Let"); ArbEnv.liftF(Gen.const(())) }
           n <- ArbEnv.liftF(arbString.arbitrary)
           v <- ArbF.arbF[EnvT, Exp]
-          r <- ReaderT.local { x: Env =>
-                x + n
-          }(
-            ArbF.arbF[EnvT, Exp]
-          )
+          r <- ReaderT.local { ns: Env =>
+                n :: ns
+              }(ArbF.arbF[EnvT, Exp])
         } yield Let(n, v, r)
       })
     }
@@ -82,28 +71,20 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   trait ExpLowPrio {
     import ArbEnv._
-
-    //FIXME try to pick variants smartly
-
     implicit val arbFExp: ArbEnv[Exp] = ArbEnv.gen[Exp]
-//    implicit val arbFLit: ArbEnv[Lit] = ArbEnv.gen[Lit]
-//    implicit val arbFAdd: ArbEnv[Add] = ArbEnv.gen[Add]
-
   }
 
   import Exp._
 
-
   case class ValidExp(e: Exp)
 
-  implicit def validExp(implicit ev: ArbEnv[Exp]): Arbitrary[ValidExp] = {
+  implicit def validExp(implicit ev: ArbEnv[Exp]): Arbitrary[ValidExp] =
     Arbitrary(
-      ev.arb.run(Set('_')).map(ValidExp)
+      ev.arb.run(List.empty).map(ValidExp)
     )
-  }
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
-    PropertyCheckConfiguration(sizeRange = 200, minSize = 50, minSuccessful = 100)
+    PropertyCheckConfiguration(sizeRange = 200, minSize = 50, minSuccessful = 1000)
 
   it should "work" in {
 
@@ -114,16 +95,14 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   }
 
-
-
 }
 
 object EqInstances {
   def sampledCogenEq[A](trials: Int)(implicit ev: Arbitrary[A]): Eq[Cogen[A]] =
     new Eq[Cogen[A]] {
       def eqv(x: Cogen[A], y: Cogen[A]): Boolean = {
-        val gen : Gen[A] = ev.arbitrary
-        val params : Gen.Parameters = Gen.Parameters.default
+        val gen: Gen[A]            = ev.arbitrary
+        val params: Gen.Parameters = Gen.Parameters.default
         // Loop Function which checks that the seeds from perturbing
         // given cogens create equivalent seeds for x iterations
         // to consider them equal
@@ -134,10 +113,10 @@ object EqInstances {
             val rx = gen.doApply(params, seed) // Get Value
             rx.retrieve.fold(
               loop(count, retries - 1, rx.seed) // Loop As Necessary
-            ){ a =>
+            ) { a =>
               val seed = Seed.random
-              val sx = x.perturb(seed, a)
-              val sy = y.perturb(seed, a)
+              val sx   = x.perturb(seed, a)
+              val sy   = y.perturb(seed, a)
               if (sx != sy) false // If they are not equivalent
               else loop(count - 1, retries, rx.seed) // Another trial
             }
@@ -146,26 +125,27 @@ object EqInstances {
         loop(trials, trials, Seed.random)
       }
     }
-  def sampledGenEq[A: Eq](trials: Int): Eq[Gen[A]] = Eq.instance[Gen[A]]{ case (x, y) =>
-    val params = Gen.Parameters.default
-    def loop(count: Int, seed: Seed): Boolean =
-      if (count <= 0) true
-      else {
-        // Leave this so the inequality creates the eq
-        val tx = Try(x.doApply(params, seed))
-        val ty = Try(y.doApply(params, seed))
-        (tx, ty) match {
-          case (Failure(_), Failure(_)) =>
-            // They both failed, good, keep going
-            loop(count - 1, Seed.random)
-          case (Success(rx), Success(ry)) =>
-            if (rx.retrieve != ry.retrieve) false
-            else loop(count - 1, seed.next)
-          case _ =>
-            false
+  def sampledGenEq[A: Eq](trials: Int): Eq[Gen[A]] = Eq.instance[Gen[A]] {
+    case (x, y) =>
+      val params = Gen.Parameters.default
+      def loop(count: Int, seed: Seed): Boolean =
+        if (count <= 0) true
+        else {
+          // Leave this so the inequality creates the eq
+          val tx = Try(x.doApply(params, seed))
+          val ty = Try(y.doApply(params, seed))
+          (tx, ty) match {
+            case (Failure(_), Failure(_)) =>
+              // They both failed, good, keep going
+              loop(count - 1, Seed.random)
+            case (Success(rx), Success(ry)) =>
+              if (rx.retrieve != ry.retrieve) false
+              else loop(count - 1, seed.next)
+            case _ =>
+              false
+          }
         }
-      }
-    loop(trials, Seed.random)
+      loop(trials, Seed.random)
   }
 
 }
@@ -209,26 +189,22 @@ class GenLaws extends CatsSuite with ScalaCheckSetup {
 
   type SGen[A] = StateT[Gen, Int, A]
 
-  implicit def arbFAStaetT[A: Arbitrary]: Arbitrary[SGen[A]] = {
-    Arbitrary[SGen[A]](Arbitrary.arbitrary[A].flatMap(a =>
-      Gen.oneOf[SGen[A]](
-        StateT.get[Gen, Int].as(a),
-        StateT.modify[Gen, Int](_ + 1).as(a),
-        StateT.modify[Gen, Int](_ - 1).as(a),
-        StateT.modify[Gen, Int](_ * -1).as(a)
-      )
-    )
+  implicit def arbFAStaetT[A: Arbitrary]: Arbitrary[SGen[A]] =
+    Arbitrary[SGen[A]](
+      Arbitrary
+        .arbitrary[A]
+        .flatMap(
+          a =>
+            Gen.oneOf[SGen[A]](
+              StateT.get[Gen, Int].as(a),
+              StateT.modify[Gen, Int](_ + 1).as(a),
+              StateT.modify[Gen, Int](_ - 1).as(a),
+              StateT.modify[Gen, Int](_ * -1).as(a)
+          )))
 
-    )
-  }
-
-
-
-
-  implicit def eqFA[A: Eq]: Eq[SGen[A]] = {
+  implicit def eqFA[A: Eq]: Eq[SGen[A]] =
 //    implicit def eqGenA: Eq[Gen[A]] = EqInstances.sampledGenEq(1000)
     Eq.by(_.run(0))
-  }
 
   // Tests Alternative
 //  checkAll("Gen", AlternativeTests[Gen].alternative[Int, Int, Int])
@@ -249,9 +225,8 @@ class GenLaws extends CatsSuite with ScalaCheckSetup {
   //  checkAll("Gen[NonEmptyList[Int]]", SemigroupTests[Gen[NonEmptyList[Int]]].semigroup)
 }
 
-
 object GenInstances {
-  implicit val genInstances : Monad[Gen] with Defer[Gen] = new Monad[Gen] with Defer[Gen] {
+  implicit val genInstances: Monad[Gen] with Defer[Gen] = new Monad[Gen] with Defer[Gen] {
     // Members declared in cats.Applicative
     override def pure[A](x: A): Gen[A] =
       Gen.const(x)
@@ -259,7 +234,7 @@ object GenInstances {
     // Members declared in cats.FlatMap
     override def flatMap[A, B](fa: Gen[A])(f: A => Gen[B]): Gen[B] =
       fa.flatMap(f)
-    override def tailRecM[A, B](a: A)(f: A => Gen[Either[A,B]]): Gen[B] =
+    override def tailRecM[A, B](a: A)(f: A => Gen[Either[A, B]]): Gen[B] =
       GenShims.tailRecM(a)(f)
 
     override def defer[A](fa: => Gen[A]): Gen[A] = {
@@ -270,39 +245,31 @@ object GenInstances {
 
 }
 
-
 object GenShims {
 
   type P = Gen.Parameters
 
-  import Gen.{R, r, gen}
+  import Gen.{gen, r, R}
 
   def tailRecM[A, B](a0: A)(fn: A => Gen[Either[A, B]]): Gen[B] = {
 
     @tailrec
     def tailRecMR(a: A, seed: Seed, labs: Set[String])(fn: (A, Seed) => R[Either[A, B]]): R[B] = {
-      val re = fn(a, seed)
+      val re       = fn(a, seed)
       val nextLabs = labs | re.labels
       re.retrieve match {
-        case None => r(None, re.seed).copy(l = nextLabs)
+        case None           => r(None, re.seed).copy(l = nextLabs)
         case Some(Right(b)) => r(Some(b), re.seed).copy(l = nextLabs)
-        case Some(Left(a)) => tailRecMR(a, re.seed, nextLabs)(fn)
+        case Some(Left(a))  => tailRecMR(a, re.seed, nextLabs)(fn)
       }
     }
 
     // This is the "Reader-style" appoach to making a stack-safe loop:
     // we put one outer closure around an explicitly tailrec loop
     gen[B] { (p: P, seed: Seed) =>
-      tailRecMR(a0, seed, Set.empty) { (a, seed) => fn(a).doApply(p, seed) }
+      tailRecMR(a0, seed, Set.empty) { (a, seed) =>
+        fn(a).doApply(p, seed)
+      }
     }
   }
 }
-
-
-
-
-
-
-
-
-
