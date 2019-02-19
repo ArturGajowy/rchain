@@ -1,7 +1,7 @@
 package org.scalacheck
 
 import cats.{Eq, Monad}
-import cats.data.{IndexedStateT, NonEmptyList, StateT}
+import cats.data._
 import cats.free.Free
 import cats.laws.discipline.{AlternativeTests, MonadTests}
 import cats.mtl.laws.discipline.MonadStateTests
@@ -18,23 +18,83 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   behavior of "StateGen"
 
-  sealed trait Exp[A]
-  case class Lit[A](v: Int) extends Exp[A]
-  case class Add[A](l: A, r: A) extends Exp[A]
-  case class Let[A](n: String, v: A, r: A) extends Exp[A]
-  case class Ref[A](n: String) extends Exp[A]
+  sealed trait Exp
+  case class Lit(v: Int) extends Exp
+  case class Add(l: Exp, r: Exp) extends Exp
+  case class Let(n: Char, v: Exp, r: Exp) extends Exp
+  case class Ref(n: Char) extends Exp
 
-  type Prog[A] = Free[Exp, A]
+  type SGen[A] = StateT[Gen, Map[Char, Exp], A]
 
-  def lit[A](v: Int): Prog[A] = Free(Lit(v))
-  def add[A](l: Prog[A], r: Prog[A]): Prog[A] = Free(Add(l , r))
-  def let[A](n: String, v: Prog[A], r: Prog[A]): Prog[A] = Free(Let(n, v, r))
-  def ref[A](n: String) = Free(Ref(n))
+  implicit def arbString: Arbitrary[Char] = Arbitrary(Gen.alphaChar)
+  implicit def arbInt: Arbitrary[Int] = Arbitrary(Gen.chooseNum(-5, 5))
+
+  def print(e: Exp): String = e match {
+    case Lit(v) => v.toString
+    case Add(l, r) => s"(${print(l)} + ${print(r)})"
+    case Let(n, v, r) => s"let\n  $n = ${print(v)} in ${print(r)})"
+    case Ref(n) => s"$n"
+  }
+
+  object Exp {
+
+    import org.scalacheck.Arbitrary._
+
+    import ArbEnv._
+
+    implicit val arbFLit = ArbEnv.gen[Lit]
+    implicit val arbFAdd = ArbEnv.gen[Add]
+    implicit val arbFLet = ArbEnv.gen[Let]
+    implicit val arbFRef = ArbEnv.gen[Ref]
+    implicit val arbFExp = ArbEnv.gen[Exp]
+  }
+
+  case class ValidExp(e: Exp)
+
+  type Env = Set[Char]
+  type EnvT[F[_], A] = ReaderT[F, Env, A]
+  type ArbEnv[A] = ArbF[EnvT, A]
+
+  import GenInstances._
+
+  object ArbEnv extends GenericArb[EnvT] {
+
+    implicit def liftArbitrary[A: Arbitrary]: ArbF[EnvT, A] = ArbF[EnvT, A](liftF[A](Arbitrary.arbitrary[A]))
+
+
+    override def monad = Monad[EnvT[Gen, ?]]
+    override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
+  }
+
+
+  import Exp._
+
+
+  implicit val arbFLet = ArbF[EnvT, Let](for {
+    n <- ReaderT.liftF(Gen.oneOf('a', 'b'))
+    v <- ArbF.arbF[EnvT, Exp]
+    r <- ReaderT.local{ x: Env => x + n }(
+      ArbF.arbF[EnvT, Exp]
+    )
+  } yield Let(n, v, r))
+
+  def arbitraryArbF[A: Arbitrary]: ArbEnv[A] = {
+    ArbF[EnvT, A] { ReaderT.liftF(Arbitrary.arbitrary[A]) }
+  }
+
+  implicit def validExp(implicit ev: ArbEnv[Exp]): Arbitrary[ValidExp] = {
+    Arbitrary(
+      ev.arb.run(Set.empty).map(ValidExp)
+    )
+  }
 
   it should "work" in {
-    println("foo")
-    import GenInstances._
-    println(implicitly[Monad[StateT[Gen, Int, ?]]])
+
+    forAll { v: ValidExp =>
+      println(print(v.e))
+      println("=============")
+    }
+
   }
 
 
