@@ -2,11 +2,9 @@ package org.scalacheck
 
 import cats.{Eq, Monad}
 import cats.data._
-import cats.free.Free
-import cats.laws.discipline.{AlternativeTests, MonadTests}
+import cats.laws.discipline.MonadTests
 import cats.mtl.laws.discipline.MonadStateTests
 import cats.tests.CatsSuite
-import org.scalacheck.Gen.P
 import org.scalacheck.rng.Seed
 import org.scalatest.prop.PropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
@@ -24,8 +22,6 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
   case class Let(n: Char, v: Exp, r: Exp) extends Exp
   case class Ref(n: Char) extends Exp
 
-  type SGen[A] = StateT[Gen, Map[Char, Exp], A]
-
   implicit def arbString: Arbitrary[Char] = Arbitrary(Gen.alphaChar)
   implicit def arbInt: Arbitrary[Int] = Arbitrary(Gen.chooseNum(-5, 5))
 
@@ -36,18 +32,32 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
     case Ref(n) => s"$n"
   }
 
-  object Exp {
+  import GenInstances._
 
-    import org.scalacheck.Arbitrary._
+  object Exp extends LowPrio {
 
+    implicit val arbFLet = ArbF[EnvT, Let](for {
+      n <- ReaderT.liftF(Gen.oneOf('Ą', 'Ź'))
+      v <- ArbF.arbF[EnvT, Exp](arbFExp)
+      r <- ReaderT.local{ x: Env => x + n }(
+        ArbF.arbF[EnvT, Exp]
+      )
+    } yield Let(n, v, r))
+
+  }
+
+  trait LowPrio {
     import ArbEnv._
 
-    implicit val arbFLit = ArbEnv.gen[Lit]
-    implicit val arbFAdd = ArbEnv.gen[Add]
-    implicit val arbFLet = ArbEnv.gen[Let]
-    implicit val arbFRef = ArbEnv.gen[Ref]
-    implicit val arbFExp = ArbEnv.gen[Exp]
+    implicit val arbFExp: ArbEnv[Exp] = ArbEnv.gen[Exp]
+    implicit val arbFLit: ArbEnv[Lit] = ArbEnv.gen[Lit]
+    implicit val arbFAdd: ArbEnv[Add] = ArbEnv.gen[Add]
+    implicit val arbFRef: ArbEnv[Ref] = ArbEnv.gen[Ref]
+
   }
+
+  import Exp._
+
 
   case class ValidExp(e: Exp)
 
@@ -55,32 +65,15 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
   type EnvT[F[_], A] = ReaderT[F, Env, A]
   type ArbEnv[A] = ArbF[EnvT, A]
 
-  import GenInstances._
 
   object ArbEnv extends GenericArb[EnvT] {
-
-    implicit def liftArbitrary[A: Arbitrary]: ArbF[EnvT, A] = ArbF[EnvT, A](liftF[A](Arbitrary.arbitrary[A]))
-
 
     override def monad = Monad[EnvT[Gen, ?]]
     override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
   }
 
 
-  import Exp._
 
-
-  implicit val arbFLet = ArbF[EnvT, Let](for {
-    n <- ReaderT.liftF(Gen.oneOf('a', 'b'))
-    v <- ArbF.arbF[EnvT, Exp]
-    r <- ReaderT.local{ x: Env => x + n }(
-      ArbF.arbF[EnvT, Exp]
-    )
-  } yield Let(n, v, r))
-
-  def arbitraryArbF[A: Arbitrary]: ArbEnv[A] = {
-    ArbF[EnvT, A] { ReaderT.liftF(Arbitrary.arbitrary[A]) }
-  }
 
   implicit def validExp(implicit ev: ArbEnv[Exp]): Arbitrary[ValidExp] = {
     Arbitrary(

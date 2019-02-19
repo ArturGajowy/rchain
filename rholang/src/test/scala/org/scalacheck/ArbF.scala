@@ -22,30 +22,36 @@ import cats.implicits._
 trait GenericArb[F[_[_], _]] extends GenericArbLowPriority[F] {
 
 
-  import org.scalacheck.Arbitrary._
-
-  implicit def gen[T]: ArbF[F, T] = macro Magnolia.gen[T]
-
-}
-
-
-trait GenericArbLowPriority[F[_[_], _]] {
-
   implicit def monad: Monad[F[Gen, ?]]
-  def liftF[A](gen: Gen[A]): F[Gen, A]
 
   type Typeclass[T] = ArbF[F, T]
 
   def combine[T](ctx: CaseClass[Typeclass, T]): ArbF[F, T] = {
     val paramFs: List[F[Gen, Any]] = ctx.parameters.toList.map(_.typeclass.arb.asInstanceOf[F[Gen, Any]])
     val fParams: F[Gen, List[Any]] = paramFs.sequence
-    ArbF { fParams.map(ctx.rawConstruct) }
+    ArbF { for {
+      done <- fParams.map(ctx.rawConstruct)
+      l <- liftF(Gen.lzy(done))
+    } yield l }
   }
 
   def dispatch[T](ctx: SealedTrait[Typeclass, T]): ArbF[F, T] = {
-    val gens: List[F[Gen, T]] = ctx.subtypes.toList.map(_.typeclass.arb.asInstanceOf[F[Gen, T]])
-    val chooseGen = liftF(Gen.oneOf(gens))
+    def gens: List[F[Gen, T]] = ctx.subtypes.toList.map(_.typeclass.arb.asInstanceOf[F[Gen, T]])
+    def chooseGen = liftF(Gen.lzy(Gen.oneOf(gens)))
     ArbF[F, T] { monad.flatten(chooseGen) }
   }
+
+
+  def gen[T]: ArbF[F, T] = macro Magnolia.gen[T]
+
+}
+
+
+trait GenericArbLowPriority[F[_[_], _]] {
+
+  def liftF[A](gen: Gen[A]): F[Gen, A]
+  import org.scalacheck.Arbitrary._
+
+  implicit def liftArbitrary[A: Arbitrary]: ArbF[F, A] = ArbF[F, A](liftF[A](Arbitrary.arbitrary[A]))
 
 }
