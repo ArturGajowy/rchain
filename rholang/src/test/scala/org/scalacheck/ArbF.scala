@@ -55,6 +55,6 @@ trait GenericArbLowPriority[F[_[_], _]] {
 
   def liftF[A](gen: Gen[A]): F[Gen, A]
 
-  implicit def liftArbitrary[A: Arbitrary]: ArbF[F, A] = ArbF[F, A](liftF[A](Arbitrary.arbitrary[A]))
+  implicit def liftArbitrary[A](implicit ev: Arbitrary[A]): ArbF[F, A] = ArbF[F, A](liftF[A](Arbitrary.arbitrary[A]))
 
 }

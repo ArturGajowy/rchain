@@ -18,12 +18,9 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
 
   sealed trait Exp
   case class Lit(v: Int)                  extends Exp
-  case class Add(l: Exp, r: Exp)          extends Exp
-  case class Let(n: Char, v: Exp, r: Exp) extends Exp
+  case class Add(l: Exp, r: Exp)          extends Exp //let i = 8 in (4 + i)    //Let(i, Lit(8), Add(Lit(4), Ref(i))
+  case class Let(n: Char, v: Exp, r: Exp) extends Exp //let i = 2 in (2 + (i + 1)) // Let(i, Lit(2), Add(Lit(2), Add(Ref(i), Lit(1))
   case class Ref(n: Char)                 extends Exp
-
-  implicit def arbString: Arbitrary[Char] = Arbitrary(Gen.alphaChar)
-  implicit def arbInt: Arbitrary[Int]     = Arbitrary(Gen.chooseNum(-5, 5))
 
   def print(e: Exp): String = e match {
     case Lit(v)       => v.toString
@@ -44,28 +41,30 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
     override def liftF[A](gen: Gen[A]): EnvT[Gen, A] = ReaderT.liftF(gen)
   }
 
+  implicit def arbString: Arbitrary[Char] = Arbitrary(Gen.alphaChar)
+  implicit def arbInt: Arbitrary[Int]     = Arbitrary(Gen.chooseNum(-5, 5))
+
   object Exp extends ExpLowPrio {
 
-    implicit val arbFRef = {
-      ArbF[EnvT, Ref](Defer[EnvT[Gen, ?]].defer {
-        for {
-          ns <- ReaderT.ask[Gen, Env]
-          n  <- ArbEnv.liftF(if (ns.isEmpty) Gen.fail else Gen.oneOf(ns))
-        } yield Ref(n)
-      })
-    }
+    type ErrEff[A] = Either[Throwable, A]
 
-    implicit val arbFLet = {
-      ArbF[EnvT, Let](Defer[EnvT[Gen, ?]].defer {
-        for {
-          n <- ArbEnv.liftF(arbString.arbitrary)
-          v <- ArbF.arbF[EnvT, Exp]
-          r <- ReaderT.local { ns: Env =>
-                n :: ns
-              }(ArbF.arbF[EnvT, Exp])
-        } yield Let(n, v, r)
-      })
-    }
+
+    implicit val arbFLet = ArbF[EnvT, Let](
+      for {
+        n <- ArbEnv.liftF(arbString.arbitrary)
+        v <- ArbF.arbF[EnvT, Exp]
+        r <- ReaderT.local { ns: Env =>
+              n :: ns
+            }(ArbF.arbF[EnvT, Exp])
+      } yield Let(n, v, r)
+    )
+
+    implicit val arbFRef = ArbF[EnvT, Ref](
+      for {
+        ns <- ReaderT.ask[Gen, Env]
+        n  <- ArbEnv.liftF(if (ns.isEmpty) Gen.fail else Gen.oneOf(ns))
+      } yield Ref(n)
+    )
 
   }
 
@@ -84,7 +83,7 @@ class SubSpec extends FlatSpec with Matchers with PropertyChecks {
     )
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
-    PropertyCheckConfiguration(sizeRange = 200, minSize = 50, minSuccessful = 1000)
+    PropertyCheckConfiguration(sizeRange = 200, minSize = 50, minSuccessful = 10)
 
   it should "work" in {
 
