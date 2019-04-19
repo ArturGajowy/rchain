@@ -8,10 +8,17 @@ import coop.rchain.models._
 import coop.rchain.models.serialization.implicits._
 import coop.rchain.rholang.Resources.mkRuntime
 import coop.rchain.rholang.StackSafetySpec.findMaxRecursionDepth
+import coop.rchain.rholang.interpreter.accounting._cost
 import coop.rchain.rholang.interpreter.{Interpreter, ParBuilder, PrettyPrinter}
 import coop.rchain.rspace.Serialize
 import coop.rchain.shared.Log
-import monix.eval.{Coeval, Task}
+import monix.eval.{Coeval}
+import scalaz.zio
+import scalaz.zio.interop.ParIO
+import scalaz.zio.{DefaultRuntime, Task, ZIO}
+import scalaz.zio.interop.catz._
+import scalaz.zio.interop.catz.implicits._
+import scalaz.zio.interop.catz.mtl._
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.{Assertions, FlatSpec, Matchers}
@@ -186,25 +193,32 @@ class StackSafetySpec extends FlatSpec with TableDrivenPropertyChecks with Match
          |  @5!($term)
          |""".stripMargin
 
+    type TaskPar[A] = ParIO[Any, Throwable, A]
+
     isolateStackOverflow {
       val ast = ParBuilder[Coeval].buildNormalizedTerm(rho).value()
       PrettyPrinter().buildString(ast)
       checkSuccess(rho) {
-        mkRuntime(tmpPrefix, mapSize).use { runtime =>
+        mkRuntime[Task, TaskPar](tmpPrefix, mapSize).use { runtime =>
           implicit val c = runtime.cost
-          Interpreter[Task].evaluate(runtime, rho)
+          Interpreter.interpreter[Task].evaluate(runtime, rho)
         }
       }
     }
   }
 
-  private def checkSuccess(rho: String)(task: => Task[_]): Unit =
-    task.attempt
-      .runSyncUnsafe(maxDuration)
-      .swap
+  import cats.implicits._
+
+  private def checkSuccess(rho: String)(task: => Task[_]): Unit = {
+    val runtime                     = new DefaultRuntime {}
+    val res: Either[Throwable, Any] = runtime.unsafeRun(task.attempt)
+
+//    val res = task.attempt.runSyncUnsafe(maxDuration)
+    res.swap
       .foreach(error => fail(s"""Execution failed for: $rho
                                                |Cause:
                                                |$error""".stripMargin))
+  }
 
 }
 

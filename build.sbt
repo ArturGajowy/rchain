@@ -401,7 +401,9 @@ lazy val rholang = (project in file("rholang"))
       lightningj,
       catsLawsTest,
       catsLawsTestkitTest,
-      catsMtlLawsTest
+      catsMtlLawsTest,
+      "org.scalaz" %% "scalaz-zio"              % "1.0-RC4",
+      "org.scalaz" %% "scalaz-zio-interop-cats" % "1.0-RC4"
     ),
     mainClass in assembly := Some("coop.rchain.rho2rose.Rholang2RosetteCompiler"),
     coverageExcludedFiles := Seq(
