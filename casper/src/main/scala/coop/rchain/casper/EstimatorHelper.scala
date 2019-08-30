@@ -154,7 +154,7 @@ object EstimatorHelper {
   ): Map[Blake2b256Hash, Set[TuplespaceEvent]] = {
     val nonPersistentProducesInComms = b.comms.flatMap(_.produces).filterNot(_.persistent)
     val nonPersistentConsumesInComms = b.comms.map(_.consume).filterNot(_.persistent)
-    val freeProduces                 = b.produces.diff(nonPersistentProducesInComms)
+    val freeProduces                 = b.produces.diff(nonPersistentProducesInComms).filter(_.sequenceNumber == 0)
     val freeConsumes                 = b.consumes.diff(nonPersistentConsumesInComms)
 
     val produceEvents = freeProduces.map(TuplespaceEvent.from(_))
